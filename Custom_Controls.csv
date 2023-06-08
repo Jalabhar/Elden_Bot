@@ -1,0 +1,26 @@
+Action,Control
+Move Forwards,W
+Move Backwards,S
+Move Left,A
+Move Right,D
+Backstep / Dash,X
+Dodge Roll Forwards,W+X
+Dodge Roll Backwards,S+X
+Dodge Roll Left,A+X
+Dodge Roll Right,D+X
+Jump,SPACE
+Jump Attack,SPACE+LMB 
+Reset Camera / Lock-On / Remove Target,Q
+Switch Sorcery / Incantation,1
+Switch Item,2
+Switch Right-Hand Armament,3
+Switch Left-Hand Armament,4
+Attack (RH & 2H Armament),LMB
+Strong Attack (LH Armament),F
+Guard,RMB
+Crouch,C
+Skill,T
+Use Item,R
+Guard,B
+Event Action,E
+Standby, Do Nothing
