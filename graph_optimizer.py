@@ -1,9 +1,6 @@
 '''pop based optimizer, takes any function, works with discrete,
    continuous, combinatorial and mixed problems'''
 import numpy as np
-import altair as alt
-import pandas as pd
-from scipy.stats import qmc
 from scipy.spatial.distance import cdist
 import time
 
@@ -17,22 +14,6 @@ def distance_matrix(points, cat_vars):
     prox_matrix = euclidean_distances+cat_distances
     return prox_matrix
 
-
-def plot_scatter(points, values, constraint_count):
-    'plots all points in the swarm, works for 2D only'
-    data_frame = pd.DataFrame()
-    data_frame['X'] = points.T[0]
-    data_frame['Y'] = points.T[1]
-    data_frame['values'] = values
-    data_frame['constraint'] = constraint_count.T
-    data_frame['constraint'] = data_frame['constraint'].to_string()
-    chart_2 = alt.Chart(data_frame).mark_circle().encode(  # type: ignore
-        alt.X('X', scale=alt.Scale(zero=False)),  # type: ignore
-        alt.Y('Y', scale=alt.Scale(zero=False)),  # type: ignore
-        alt.Shape('constraint', type='ordinal'),  # type: ignore
-        alt.Color('values', scale=alt.Scale(scheme='Spectral' #type: ignore
-                                            ))).interactive()
-    chart_2.show()
 
 
 def get_constraints(eval_point, constraints=None):
@@ -83,7 +64,7 @@ def limit_pos(eval_point, limite, passo, permut):
 def optimize(objective_function, lim, *args,  n_parts=20,n_iterations=200,
              n_neighbors=3, global_search_threshold=1e-1,
              Const_funcs=None, passo=None,permut=False, cat_vars_index=None,
-             plot=False, return_history=False):
+             return_history=False):
     '''Runs the actual optimization process'''
     lim = np.asarray(lim)
     n_dims = lim.shape[1]
@@ -126,9 +107,6 @@ def optimize(objective_function, lim, *args,  n_parts=20,n_iterations=200,
     tested_points = {}
     self_best = swarm.copy()
     self_best_vals = values.copy()
-    if n_dims == 2 and plot:
-        c = np.zeros(n_parts)
-        plot_scatter(swarm, values, c)
     j = 0
     global_search_threshold = global_search_threshold**(1/n_dims)
     global_search_threshold += step_size
@@ -136,6 +114,7 @@ def optimize(objective_function, lim, *args,  n_parts=20,n_iterations=200,
     iter_since_improv = 0
     while speed > 0:
         print('mean value at iter ' + str(j) + ' is: ' + str(values.mean()))
+        print('\n')
         time.sleep(5.0)
         j += 1
         print('starting iter: '+str(j))
@@ -243,8 +222,6 @@ def optimize(objective_function, lim, *args,  n_parts=20,n_iterations=200,
                 iter_since_improv += 1
         pop_std = np.std(swarm, axis=0)
         speed /= n_parts
-        if n_dims == 2 and plot and j % 5 == 1:
-            plot_scatter(swarm, values, constraint_count)
         if speed <= ((global_search_threshold*0.5)):
             revive = np.random.uniform()
             if revive < (1-progress**2)**2:
