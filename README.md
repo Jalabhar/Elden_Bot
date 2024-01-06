@@ -16,4 +16,5 @@ Before the training begins, a Site of Grace of your choice should be marked as f
 
 A set of parameters saved after a few iterations is available in this repo as a numpy file named 'EldenBrain.npy'. This is provided as an example of how the bot works, and only works with the model architecture in its current configuration. Any modifications will require starting the training process from scratch. Please note that the set of parameters provided is the result of only a few iterations of training, therefore being far from a converged sample, and is not a proper example of the model's full potential. 
 
-This project has been developed and tested exclusively in Windows 11 with Python 3.10
+This project has been developed and tested exclusively in Windows 11 with Python 3.10, using a PC with a Intel i7 8700 CPU and a NVidia GTX 1070 GPU with 6GB VRAM,and 16GB RAM.
+The game was running at 800x450 resolution with all graphic settings defined to low in order to ensure stability. Better hardware would certainly run it at better quality, though it would be unlikely to have any impact in the bot's effectiveness.
