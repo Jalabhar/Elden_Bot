@@ -1,5 +1,5 @@
 import numpy as np
-import Elden_Bot_8 as Bot
+import Elden_Bot as Bot
 import time
 
 time.sleep(3.0)
