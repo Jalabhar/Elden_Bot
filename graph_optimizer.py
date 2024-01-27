@@ -8,47 +8,62 @@ from scipy.spatial.distance import cdist
 
 
 def distance_matrix(points, cat_vars):
-    """gets the distance between all point pairs"""
+    # Separate categorical and spatial points
     cat_points = points * cat_vars
     spacial_points = points * (1 - cat_vars)
+
+    # Calculate Euclidean distances between spatial points
     euclidean_distances = cdist(spacial_points, spacial_points, metric="euclidean")
+
+    # Calculate Hamming distances between categorical points
     cat_distances = cdist(cat_points, cat_points, metric="hamming")
+
+    # Combine distances
     prox_matrix = euclidean_distances + cat_distances
+
     return prox_matrix
 
 
 def plot_scatter(points, values, constraint_count):
     "plots all points in the swarm, works for 2D only"
-    data_frame = pd.DataFrame()
-    data_frame["X"] = points.T[0]
-    data_frame["Y"] = points.T[1]
-    data_frame["values"] = values
-    data_frame["constraint"] = constraint_count.T
-    data_frame["constraint"] = data_frame["constraint"].to_string()
+    data_frame = pd.DataFrame(
+        {
+            "X": points[:, 0],
+            "Y": points[:, 1],
+            "values": values,
+            "constraint": constraint_count.T.flatten().astype(str),
+        }
+    )
     sns.scatterplot(
-        x=data_frame["X"],
-        y=data_frame["Y"],
-        hue=data_frame["values"],
-        markers=data_frame["constraint"],
+        data=data_frame,
+        x="X",
+        y="Y",
+        hue="values",
+        markers="constraint",
         palette="magma",
     )
     plt.show()
 
 
-def get_constraints(eval_point, constraints=None):
-    """imposes all constraint functions on the problem"""
+def get_constraint_breaks(eval_point, constraints=None):
+    """
+    Applies constraint functions to the problem and returns the number of constraint breaks.
+
+    Args:
+        eval_point (float): The evaluation point.
+        constraints (dict): A dictionary containing the constraint functions and their parameters.
+
+    Returns:
+        int: The number of constraint breaks.
+    """
     constraint_breaks = 0
-    if constraints is not None:
-        for func in constraints:
-            parameters = constraints[func]
-            if len(parameters) == 2:
-                args = parameters[2]
-                constraint_values = func(eval_point, args)
-            else:
-                constraint_values = func(eval_point)
-            constraint_thresh = parameters[0]
-            sign = parameters[1]
-            constraint_breaks += sign * constraint_thresh > sign * constraint_values
+    if constraints:
+        for constraint, params in constraints.items():
+            args = params.get("args")
+            values = constraint(eval_point, args) if args else constraint(eval_point)
+            threshold = params["thresh"]
+            sign = params["sign"]
+            constraint_breaks += sign * threshold > sign * values
     return constraint_breaks
 
 
@@ -56,10 +71,12 @@ def limit_pos(eval_point, limite, passo, permut):
     """guarantees that tried points comply with any restrictions"""
     num_dim = len(limite[0])
     for i in range(num_dim):
-        s_var = passo[i]
-        if s_var > 0.0:
-            grid = round(eval_point[i] / s_var)
-            eval_point[i] = grid * s_var
+        if eval_point[i] > limite[1][i]:
+            dif = (eval_point[i] - limite[1][i]) % (limite[1][i] - limite[0][i])
+            eval_point[i] = limite[0][i] + dif
+        elif eval_point[i] < limite[0][i]:
+            dif = limite[0][i] - eval_point[i] % (limite[1][i] - limite[0][i])
+            eval_point[i] = limite[1][i] - dif
     if permut:
         uni = []
         b = list(range(num_dim))
@@ -70,12 +87,10 @@ def limit_pos(eval_point, limite, passo, permut):
                 uni.append(v)
         eval_point = np.asarray(uni)
     for i in range(num_dim):
-        if eval_point[i] > limite[1][i]:
-            dif = eval_point[i] - limite[1][i]
-            eval_point[i] = limite[0][i] + dif
-        elif eval_point[i] < limite[0][i]:
-            dif = limite[0][i] - eval_point[i]
-            eval_point[i] = limite[1][i] - dif
+        s_var = passo[i]
+        if s_var > 0.0:
+            grid = round(eval_point[i] / s_var)
+            eval_point[i] = grid * s_var
     return eval_point
 
 
@@ -93,42 +108,50 @@ def optimize(
     permut=False,
     cat_vars_index=None,
     plot=False,
-    return_history=False
+    return_history=False,
+    init_mode="uniform"
 ):
     """Runs the actual optimization process"""
     lim = np.asarray(lim)
     n_dims = lim.shape[1]
     constraint_count = np.inf * np.ones(n_parts)
     best_self_constraint_count = np.inf * np.ones(n_parts)
+    values = np.zeros(n_parts)
     if passo is None:
         passo = np.zeros(n_dims)
     step_size = np.linalg.norm(passo)
     if cat_vars_index is None:
         cat_vars_index = np.zeros(n_dims)
     if base_solution is not None:
-        std = 0.1 * ((lim[1] - lim[0]).min())
+        std = 0.05 * ((lim[1] - lim[0]).min())
         swarm = base_solution + np.random.normal(0, std, (n_parts, n_dims))
-    else:
+    elif init_mode == "uniform":
         swarm = np.random.uniform(lim[0], lim[1], (n_parts, n_dims))
+    elif init_mode == "normal":
+        R = lim[1] - lim[0]
+        swarm = np.random.normal((lim[0] + lim[1]) / 2.0, 0.05 * R, (n_parts, n_dims))
     for i in range(n_parts):
         swarm[i] = limit_pos(swarm[i], lim, passo, permut)
-        best_self_constraint_count[i] = get_constraints(
+        best_self_constraint_count[i] = get_constraint_breaks(
             swarm[i], constraints=Const_funcs
         )
     best_pos_history = []
     best_vals_history = []
-    t_steps = 0.01 * args[0]
-    values = np.apply_along_axis(objective_function, -1, swarm, t_steps)
+    for n, part in enumerate(swarm):
+        print("\n")
+        print("iteration: 0 part: ", n)
+        values[n] = objective_function(part)
     global_best_index = np.argmin(values)
     global_best_value = np.min(values)
     global_best_pos = swarm[global_best_index]
     if base_solution is not None:
-        ref_value = objective_function(base_solution, t_steps)
+        ref_value = objective_function(base_solution)
         if ref_value < global_best_value:
             global_best_value = ref_value
             global_best_pos = base_solution
-            np.save("EldenBrain.npy", global_best_pos)
+    np.save("MetaBrain.npy", global_best_pos)
     best_constraint_break = np.min(best_self_constraint_count)
+    print("\n")
     print("best so far: ", global_best_value)
     movement = 0
     r_0 = 0
@@ -153,6 +176,7 @@ def optimize(
             2 * (1 + progress)
         ) + global_search_threshold
         Dists = distance_matrix(swarm, cat_vars_index)
+        Dists[Dists == 0] = 2*Dists.max()
         neighbor_indexes = np.argpartition(Dists, n_neighbors, axis=0)[:n_neighbors].T
         best_neighbors = []
         best_neighbor_vals = []
@@ -164,10 +188,11 @@ def optimize(
             best_neighbor = neighbors[chosen_index]
             best_neighbors.append(best_neighbor)
             best_neighbor_vals.append(min_neighbor_val)
-        mode_ind = np.random.uniform(0, 1, (n_parts, 3))
-        phase_ind = np.random.uniform(-np.pi, np.pi, (n_parts, 3))
-        t_steps = np.maximum(t_steps, progress * args[0])
+        mode_ind = np.random.uniform(0, 0.6, (n_parts, 3))
+        phase_ind = np.random.uniform(0, np.pi, (n_parts, 3))
         for i in range(n_parts):
+            print("\n")
+            print("iteration: ", j , " part: ", i)
             if mode_ind[i][0] < 0.5:
                 r_0 = np.sin(phase_ind[i][0])
             elif mode_ind[i][0] >= 0.5:
@@ -187,18 +212,14 @@ def optimize(
             ind_speed = np.linalg.norm(movement)
             if ind_speed > max_speed:
                 movement *= (max_speed / ind_speed) ** n_dims
-                ind_speed = np.linalg.norm(movement)
             speed += ind_speed
             swarm[i] = swarm[i] + movement
             swarm[i] = limit_pos(swarm[i], lim, passo, permut)
             point = swarm[i]
-            p_key = tuple(point)
-            if p_key in tested_points:
-                values[i] = tested_points[p_key]
-            else:
-                values[i] = objective_function(point, t_steps)
-                tested_points[p_key] = values[i]
-            constraint_count[i] = get_constraints(swarm[i], constraints=Const_funcs)
+            values[i] = objective_function(point)
+            constraint_count[i] = get_constraint_breaks(
+                swarm[i], constraints=Const_funcs
+            )
             if constraint_count[i] < best_self_constraint_count[i]:
                 self_best[i] = swarm[i]
             elif values[i] <= (
@@ -214,19 +235,23 @@ def optimize(
                 best_pos_history.append(global_best_pos)
                 best_vals_history.append(global_best_value)
                 iter_since_improv = 0
+                print("\n")
                 print("best so far: ", global_best_value)
-                np.save("EldenBrain.npy", global_best_pos)
+                print("\n")
+                np.save("MetaBrain.npy", global_best_pos)
             elif constraint_count[i] == best_constraint_break and (
                 values[i] < global_best_value
             ):
                 global_best_index = i
                 global_best_value = values[i]
+                print("\n")
                 print("best so far: ", global_best_value)
+                print("\n")
                 global_best_pos = swarm[i]
                 best_pos_history.append(global_best_pos)
                 best_vals_history.append(global_best_value)
                 iter_since_improv = 0
-                np.save("EldenBrain.npy", global_best_pos)
+                np.save("MetaBrain.npy", global_best_pos)
             else:
                 iter_since_improv += 1
         speed /= n_parts
@@ -234,13 +259,15 @@ def optimize(
             plot_scatter(swarm, values, constraint_count)
         if speed <= ((global_search_threshold * 0.5)):
             revive = np.random.uniform()
-            revive_thresh = 1 - progress**2
-            if revive < revive_thresh**2:
-                kick_dev = swarm.std()
-                k_1 = np.random.normal(0.0, 0.1 * revive_thresh * kick_dev, swarm.shape)
-                k_2 = np.random.normal(0.0, 0.1 * revive_thresh * kick_dev, swarm.shape)
+            revive_thresh = 1 - progress
+            if revive < revive_thresh:
+                kick_dev = 0.1 * swarm.std()
+                k_1 = np.random.normal(0.0, kick_dev, swarm.shape)
+                k_2 = np.random.normal(0.0, kick_dev, swarm.shape)
                 kick = k_1 / k_2
+                print("\n")
                 print("kicked with power: ", kick_dev, " at iter: ", j)
+                print("\n")
                 speed = np.linalg.norm(kick)
                 swarm = swarm + kick
                 for part in swarm:
@@ -251,7 +278,6 @@ def optimize(
             break
         if progress >= 1:
             break
-    # _ = objective_function(global_best_pos, t_steps)
     if return_history is True:  # serve p avaliar convergencia, n tem utilidade em prod
         return (
             global_best_pos,
