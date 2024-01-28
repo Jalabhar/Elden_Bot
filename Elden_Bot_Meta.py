@@ -124,7 +124,9 @@ def walk_to_boss(boss=None):  # margit
         time.sleep(7.0)
         pydirectinput.keyUp("w")
     if boss == None:
-        time.sleep(0.5)
+        pydirectinput.keyDown("w")
+        time.sleep(2.0)
+        pydirectinput.keyUp("w")
     print("Engaging Bot")
 
 
@@ -209,22 +211,6 @@ def get_values(x1, y1, x2, y2):
 def activate_control(command, walking):
     """
     Activates the control based on the given command.
-
-    Args:
-        command (str): The command to be executed.
-        walking (bool): Flag indicating if the character is currently walking.
-
-    Returns:
-        bool: The updated value of the walking flag.
-
-    Raises:
-        None
-
-    Examples:
-        >>> activate_control("w", walking=True)
-        False
-        >>> activate_control("e", walking=False)
-        True
     """
     command = command.lower()
     control_action = command.split("+")
@@ -285,10 +271,21 @@ def get_runes_score(last_masked_runes, x1, y1, x2, y2):
         runes_diff = (masked_runes - last_masked_runes).sum()
         if runes_diff > 300.0:
             runes_Score = runes_diff
-            runes_Score = np.log(1 + runes_Score)
-            print(runes_Score)
+            runes_Score = np.log(1 + runes_Score) ** 2
     last_masked_runes = masked_runes
     return runes_Score, last_masked_runes
+
+
+def find_gate(x1, y1, x2, y2):
+    r = (x1, y1, x2, y2)
+    gate_finder = pyautogui.screenshot(region=r)
+    gate_finder = gate_finder.convert("HSV")
+    gate_finder = np.array(gate_finder)
+    runes_lower = np.array([28, 110, 80])
+    runes_upper = np.array([39, 220, 150])
+    gate_mask = cv2.inRange(gate_finder, runes_lower, runes_upper)
+    gate_value = gate_mask.sum() / 255.0
+    return gate_value
 
 
 def stable_sigmoid(x):
@@ -387,6 +384,20 @@ def get_probs(X, stack, stack_depth, n_filters, n_hidden_1, n_hidden_2, n_hidden
     return scaled_P
 
 
+def walk_to_gate():
+    print("walking to gate")
+    pydirectinput.keyDown("w")
+    time.sleep(3.0)
+    pydirectinput.keyUp("w")
+    time.sleep(0.2)
+    pydirectinput.keyDown("d")
+    time.sleep(0.5)
+    pydirectinput.keyUp("d")
+    time.sleep(0.5)
+    pydirectinput.press("e")
+    time.sleep(1.0)
+
+
 def run_bot(Y, max_steps=1000):
     network_size_penalty = np.sqrt(Y[:6].sum())
     x, stack_depth, n_filters, n_hidden_1, n_hidden_2, n_hidden_3 = build_bot(Y)
@@ -399,6 +410,7 @@ def run_bot(Y, max_steps=1000):
     boss_found = False
     boss_lost = False
     last_masked_runes = None
+    gate_found = False
     mode = "deterministic"
     exploration_stack = []
     control_options = controls_df["Control"].values
@@ -407,9 +419,9 @@ def run_bot(Y, max_steps=1000):
     command_stack = deque([])
     Walking = False
     novelty_threshold = 1e-12
-    final_exploration_score = 0
     final_boss_search_score = 0.0
     final_part_score = 0.0
+    gate_score = 0.0
     final_assertiveness_score = 0.0
     final_rune_score = 0.0
     partial_score = 0.0
@@ -536,15 +548,15 @@ def run_bot(Y, max_steps=1000):
                     novelty_value = ac_diff
                     if novelty_value > novelty_threshold:
                         exploration_stack.append(c_array)
-                        exploration_score += novelty_value  # ** 0.5
-                        novelty_threshold = 0.05 * np.asarray(exploration_stack).std()
+                        exploration_score += (np.log(1.0 + novelty_value)) ** 0.5
+                        novelty_threshold = 0.01 * np.asarray(exploration_stack).std()
                         exploration_stack = exploration_stack[-exploration_depth:]
                 c_array = c_array / 255.0
                 frame_stack.append(c_array)
-                if len(frame_stack) > (stack_depth + 1):
+                if len(frame_stack) > (stack_depth):
                     frame_stack.popleft()
                     frame_array = np.array(frame_stack)
-                    frame_array = np.diff(frame_array, axis=0)
+                    # frame_array = np.diff(frame_array, axis=0)
                     probs = get_probs(
                         x,
                         frame_array,
@@ -555,6 +567,17 @@ def run_bot(Y, max_steps=1000):
                         n_hidden_3,
                     )
                     # print(probs)
+                    if gate_found == False:
+                        gate_confidence = find_gate(
+                            x1 + 150, y1 + 50, x2 - 150, y2 - 50
+                        )
+                        # print(gate_confidence)
+                        if 7000.0 > gate_confidence > 2000.0:
+                            gate_found = True
+                            gate_score += 25.0
+                            if gate_found:
+                                print("gate found")
+                                walk_to_gate()
                     part_score += stats_score
                     part_score += damage_score
                     det_choice = np.argmax(probs)
@@ -584,16 +607,11 @@ def run_bot(Y, max_steps=1000):
                     stuck = True
                 part_score /= max_steps
                 partial_score = (
-                    part_score
-                    + exploration_score
-                    + boss_search_score
-                    + assertiveness_score
-                    + rune_score
+                    part_score + boss_search_score + assertiveness_score + rune_score
                 )
                 total_score += partial_score
                 final_part_score += part_score
                 final_boss_search_score += boss_search_score
-                final_exploration_score += exploration_score
                 final_assertiveness_score += assertiveness_score
                 final_rune_score += rune_score
             if is_dead:
@@ -605,11 +623,18 @@ def run_bot(Y, max_steps=1000):
     print("general score: ", final_part_score)
     print("rune score: ", final_rune_score)
     print("boss detection score: ", final_boss_search_score)
-    print("wanderlust score: ", final_exploration_score)
+    print("wanderlust score: ", exploration_score)
     print("confidence score: ", final_assertiveness_score)
     print("weights penalty: ", weights_penalty)
+    print("gate score: ", gate_score)
     print("size penalty: ", network_size_penalty)
-    total_score = total_score - weights_penalty - network_size_penalty
+    total_score = (
+        total_score
+        - weights_penalty
+        - network_size_penalty
+        + exploration_score
+        + gate_score
+    )
     print("total score: ", total_score)
     print("\n")
     if stuck:
