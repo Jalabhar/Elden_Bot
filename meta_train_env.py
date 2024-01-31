@@ -18,8 +18,8 @@ a, b, c = GO.optimize(
     lim,
     base_solution=None,
     n_iterations=50,
-    n_parts=10,
-    n_neighbors=3,
+    n_parts=50,
+    n_neighbors=5,
     init_mode="uniform",
     passo=step_size,
 )
