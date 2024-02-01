@@ -101,7 +101,7 @@ def optimize(
     base_solution=None,
     n_parts=20,
     n_iterations=200,
-    n_neighbors=3,
+    min_neighbors=3,
     global_search_threshold=1e-1,
     Const_funcs=None,
     passo=None,
@@ -114,6 +114,7 @@ def optimize(
     """Runs the actual optimization process"""
     lim = np.asarray(lim)
     n_dims = lim.shape[1]
+    max_neighbors = n_parts // 3 + 1
     constraint_count = np.inf * np.ones(n_parts)
     best_self_constraint_count = np.inf * np.ones(n_parts)
     values = np.zeros(n_parts)
@@ -140,18 +141,17 @@ def optimize(
     for n, part in enumerate(swarm):
         print("\n")
         print("iteration: 0 part: ", n)
-        values[n] = objective_function(part)
+        values[n] = objective_function(part, *args)
     global_best_index = np.argmin(values)
     global_best_value = np.min(values)
     global_best_pos = swarm[global_best_index]
     if base_solution is not None:
-        ref_value = objective_function(base_solution)
+        ref_value = objective_function(base_solution, *args)
         if ref_value < global_best_value:
             global_best_value = ref_value
             global_best_pos = base_solution
     np.save("MetaBrain.npy", global_best_pos)
     best_constraint_break = np.min(best_self_constraint_count)
-    print("\n")
     print("best so far: ", global_best_value)
     movement = 0
     r_0 = 0
@@ -169,6 +169,7 @@ def optimize(
     global_search_threshold += step_size
     iter_since_improv = 0
     while speed > 0:
+        n_neighbors = np.random.randint(min_neighbors, max_neighbors)
         j += 1
         progress = j / n_iterations
         speed = 0
@@ -176,7 +177,6 @@ def optimize(
             2 * (1 + progress)
         ) + global_search_threshold
         Dists = distance_matrix(swarm, cat_vars_index)
-        Dists[Dists == 0] = 2*Dists.max()
         neighbor_indexes = np.argpartition(Dists, n_neighbors, axis=0)[:n_neighbors].T
         best_neighbors = []
         best_neighbor_vals = []
@@ -192,31 +192,47 @@ def optimize(
         phase_ind = np.random.uniform(0, np.pi, (n_parts, 3))
         for i in range(n_parts):
             print("\n")
-            print("iteration: ", j , " part: ", i)
-            if mode_ind[i][0] < 0.5:
-                r_0 = np.sin(phase_ind[i][0])
-            elif mode_ind[i][0] >= 0.5:
-                r_0 = np.cos(phase_ind[i][0])
-            if mode_ind[i][1] < 0.5:
-                r_1 = np.sin(phase_ind[i][1])
-            elif mode_ind[i][1] >= 0.5:
-                r_1 = np.cos(phase_ind[i][1])
-            if mode_ind[i][2] < 0.5:
-                r_2 = np.sin(phase_ind[i][2])
-            elif mode_ind[i][2] >= 0.5:
-                r_2 = np.cos(phase_ind[i][2])
-            movement = r_0 * (best_neighbors[i] - swarm[i]) + r_1 * (
-                self_best[i] - swarm[i]
-            )
-            movement += r_2 * (global_best_pos - swarm[i])
+            print("iteration: ", j, " part: ", i)
+            if np.linalg.norm(swarm[i] - global_best_pos) > 0.0:
+                if mode_ind[i][0] < 0.5:
+                    r_0 = np.sin(phase_ind[i][0])
+                elif mode_ind[i][0] >= 0.5:
+                    r_0 = np.cos(phase_ind[i][0])
+                if mode_ind[i][1] < 0.5:
+                    r_1 = np.sin(phase_ind[i][1])
+                elif mode_ind[i][1] >= 0.5:
+                    r_1 = np.cos(phase_ind[i][1])
+                if mode_ind[i][2] < 0.5:
+                    r_2 = np.sin(phase_ind[i][2])
+                elif mode_ind[i][2] >= 0.5:
+                    r_2 = np.cos(phase_ind[i][2])
+                movement = r_0 * (best_neighbors[i] - swarm[i]) + r_1 * (
+                    self_best[i] - swarm[i]
+                )
+                if (best_neighbors[i] - swarm[i]).sum() == 0:
+                    movement += r_2 * (global_best_pos - swarm[i])
+            else:
+                best_kick = np.random.uniform(
+                    -0.01 * (1.0 - progress),
+                    0.01 * (1.0 - progress),
+                    n_dims,
+                )
+                swarm[i] += best_kick
+                movement = best_kick
             ind_speed = np.linalg.norm(movement)
             if ind_speed > max_speed:
                 movement *= (max_speed / ind_speed) ** n_dims
+                ind_speed = np.linalg.norm(movement)
             speed += ind_speed
             swarm[i] = swarm[i] + movement
             swarm[i] = limit_pos(swarm[i], lim, passo, permut)
             point = swarm[i]
-            values[i] = objective_function(point)
+            p_key = tuple(point)
+            if p_key in tested_points:
+                values[i] = tested_points[p_key]
+            else:
+                values[i] = objective_function(point, *args)
+                tested_points[p_key] = values[i]
             constraint_count[i] = get_constraint_breaks(
                 swarm[i], constraints=Const_funcs
             )
@@ -244,9 +260,7 @@ def optimize(
             ):
                 global_best_index = i
                 global_best_value = values[i]
-                print("\n")
                 print("best so far: ", global_best_value)
-                print("\n")
                 global_best_pos = swarm[i]
                 best_pos_history.append(global_best_pos)
                 best_vals_history.append(global_best_value)
@@ -272,7 +286,7 @@ def optimize(
                 swarm = swarm + kick
                 for part in swarm:
                     part = limit_pos(part, lim, passo, permut)
-        remaining_evals = n_iterations - j  # * n_parts
+        remaining_evals = (1 - progress) * n_iterations * n_parts
         rand_1 = np.random.uniform()
         if remaining_evals < rand_1 * iter_since_improv:
             break

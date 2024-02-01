@@ -9,7 +9,6 @@ import time
 from PIL import Image as Image
 import cv2
 
-command_reps = 10
 kernel_size = 3
 n_channels = 3
 base_width = 791
@@ -124,9 +123,10 @@ def walk_to_boss(boss=None):  # margit
         time.sleep(7.0)
         pydirectinput.keyUp("w")
     if boss == None:
-        pydirectinput.keyDown("w")
-        time.sleep(2.0)
-        pydirectinput.keyUp("w")
+        pass
+        # pydirectinput.keyDown("w")
+        # time.sleep(1.0)
+        # pydirectinput.keyUp("w")
     print("Engaging Bot")
 
 
@@ -224,11 +224,10 @@ def activate_control(command, walking):
         time.sleep(0.1)
         pydirectinput.keyUp(control_action[0])
         if control_action[1] == "x":
-            for _ in range(2):
-                pydirectinput.keyDown("q")
-                time.sleep(0.1)
-                pydirectinput.keyUp("q")
-                time.sleep(0.1)
+            time.sleep(0.2)
+            pydirectinput.keyDown("w")
+            time.sleep(0.1)
+            pydirectinput.keyUp("w")
     elif n_actions == 1:
         base_action = control_action[0]
         if base_action == "w":
@@ -240,8 +239,12 @@ def activate_control(command, walking):
                 walking = False
         elif base_action == "e":
             pydirectinput.press(base_action)
-            time.sleep(0.5)
+            time.sleep(1.0)
             pydirectinput.press("q")
+        elif base_action in ["up", "down", "left", "right"]:
+            pydirectinput.keyDown(base_action)
+            time.sleep(0.5)
+            pydirectinput.keyUp(base_action)
         elif base_action == "lmb":
             pydirectinput.mouseDown(button="left")
             time.sleep(0.1)
@@ -276,16 +279,16 @@ def get_runes_score(last_masked_runes, x1, y1, x2, y2):
     return runes_Score, last_masked_runes
 
 
-def find_gate(x1, y1, x2, y2):
-    r = (x1, y1, x2, y2)
-    gate_finder = pyautogui.screenshot(region=r)
-    gate_finder = gate_finder.convert("HSV")
-    gate_finder = np.array(gate_finder)
-    runes_lower = np.array([28, 110, 80])
-    runes_upper = np.array([39, 220, 150])
-    gate_mask = cv2.inRange(gate_finder, runes_lower, runes_upper)
-    gate_value = gate_mask.sum() / 255.0
-    return gate_value
+def find_grace(x1, y1, x2, y2):
+    r = (x1 + 270, y1 + 70, x2 - 550, y2 - 380)
+    grace_finder = pyautogui.screenshot(region=r)
+    grace_finder = grace_finder.convert("HSV")
+    grace_finder = np.array(grace_finder)
+    grace_lower = np.array([40, 75, 40])
+    grace_upper = np.array([60, 100, 60])
+    grace_mask = cv2.inRange(grace_finder, grace_lower, grace_upper)
+    grace_value = grace_mask.mean() / 255.0
+    return grace_value
 
 
 def stable_sigmoid(x):
@@ -401,7 +404,7 @@ def walk_to_gate():
 def run_bot(Y, max_steps=1000):
     network_size_penalty = np.sqrt(Y[:6].sum())
     x, stack_depth, n_filters, n_hidden_1, n_hidden_2, n_hidden_3 = build_bot(Y)
-    weights_penalty = np.linalg.norm(x) / np.sqrt(x.shape[0])
+    weights_penalty = 10.0 * np.linalg.norm(x) / np.sqrt(x.shape[0])
     controls_df = pd.read_csv("Custom_Controls.csv")
     weighted_boss_life = 0.0
     stuck = False
@@ -410,7 +413,7 @@ def run_bot(Y, max_steps=1000):
     boss_found = False
     boss_lost = False
     last_masked_runes = None
-    gate_found = False
+    grace_found = False
     mode = "deterministic"
     exploration_stack = []
     control_options = controls_df["Control"].values
@@ -418,20 +421,24 @@ def run_bot(Y, max_steps=1000):
     counter = 0
     command_stack = deque([])
     Walking = False
+    chosen_command = None
     novelty_threshold = 1e-12
+    max_time = 120.0
     final_boss_search_score = 0.0
     final_part_score = 0.0
-    gate_score = 0.0
+    # grace_score = 0.0
     final_assertiveness_score = 0.0
     final_rune_score = 0.0
     partial_score = 0.0
     exploration_score = 0.0
     stats_score = 0
-    # probs_score = 0.0
     total_score = 0.0
     Life, Mana, Stamina = 0, 0, 0
+    entropy_accumulator = 0.0
     Last_Life, Last_Mana, Last_Stamina = Life, Mana, Stamina
     boss_life = 0
+    command_reps_count = 0.0
+    max_command_reps = 10.0
     my_window_title = "ELDEN RING™"
     my_window = pygetwindow.getWindowsWithTitle(my_window_title)[0]
     my_window.activate()
@@ -446,12 +453,16 @@ def run_bot(Y, max_steps=1000):
         else:
             time.sleep(0.5)
     else:
-        first_action = True
-        if first_action:
-            walk_to_boss()
-            time.sleep(1.0)
-            first_action = False
+        walk_to_boss()
+        # time.sleep(1.0)
+        start_time = time.time()
+        grace_last_found = start_time
+        grace_found_time = start_time
         while True:
+            running_time = time.time() - start_time
+            if running_time > max_time:
+                print("max time reached")
+                stuck = True
             Last_Life, Last_Mana, Last_Stamina = Life, Mana, Stamina
             boss_search_score = 0.0
             part_score = 0.0
@@ -511,8 +522,7 @@ def run_bot(Y, max_steps=1000):
             damage_score = 100.0 * damage_score
             if (Life) < 2.0:
                 is_alive = False
-                is_dead = True
-                time.sleep(2.0)
+                # time.sleep(2.0)
                 if not is_alive:
                     capt_frame = pyautogui.screenshot(region=r)
                     c_frame = capt_frame.convert("HSV")
@@ -523,10 +533,10 @@ def run_bot(Y, max_steps=1000):
                         pydirectinput.press("RightArrow")
                         time.sleep(0.2)
                         pydirectinput.press("e")
-                        time.sleep(1.5)
+                        # time.sleep(1.5)
                 for Key in ["a", "w", "s", "d", "space"]:
                     pydirectinput.keyUp(Key)
-                time.sleep(4.0)
+                time.sleep(2.0)
                 if total_score == np.inf:
                     total_score = 1.0
             if counter % 16 == 15:
@@ -556,7 +566,9 @@ def run_bot(Y, max_steps=1000):
                 if len(frame_stack) > (stack_depth):
                     frame_stack.popleft()
                     frame_array = np.array(frame_stack)
-                    # frame_array = np.diff(frame_array, axis=0)
+                    noise = np.random.normal(0.0, 0.1, frame_array.shape)
+                    frame_array =frame_array + noise
+                    frame_array = np.clip(frame_array, 0.0, 1.0)
                     probs = get_probs(
                         x,
                         frame_array,
@@ -566,21 +578,29 @@ def run_bot(Y, max_steps=1000):
                         n_hidden_2,
                         n_hidden_3,
                     )
-                    # print(probs)
-                    if gate_found == False:
-                        gate_confidence = find_gate(
-                            x1 + 150, y1 + 50, x2 - 150, y2 - 50
-                        )
-                        # print(gate_confidence)
-                        if 7000.0 > gate_confidence > 2000.0:
-                            gate_found = True
-                            gate_score += 25.0
-                            if gate_found:
-                                print("gate found")
-                                walk_to_gate()
+                    entropy_accumulator += -np.sum(probs * np.log(probs))
+                    grace_confidence = find_grace(x1, y1, x2, y2)
+                    # print(grace_confidence)
+                    # if grace_found == False:
+                    #     if grace_confidence > 5e-4:
+                    #         grace_found = True
+                    #         if grace_found_time - grace_last_found > 10.0:
+                    #             grace_score += 400.0
+                    #         else:
+                    #             grace_score -= 100.0
+                    #         if grace_found:
+                    #             # print("grace found")
+                    #             # walk_to_gate()
+                    #             grace_found_time = time.time()
+                    # if grace_confidence < 1e-4 and grace_found:
+                    #     grace_last_found = grace_found_time
+                    #     grace_found = False
+                        # print(grace_confidence)
+                        # print("grace lost")
                     part_score += stats_score
                     part_score += damage_score
                     det_choice = np.argmax(probs)
+                    # print(probs.max())
                     stoch_choice = np.random.choice(n_controls, p=np.squeeze(probs))
                     if mode == "stochastic":
                         command_choice = stoch_choice
@@ -591,16 +611,15 @@ def run_bot(Y, max_steps=1000):
                     stoch_index[stoch_choice] = 1
                     det_index[det_choice] = 1
                     assertiveness_score = np.sum(stoch_index * det_index)
+                    last_command = chosen_command
                     chosen_command = control_options[command_choice]
                     command_stack.append(chosen_command)
-                    if len(command_stack) > int(command_reps):
-                        command_stack.popleft()
-                        command_array = np.array(command_stack)
-                        comms, comm_counts = np.unique(
-                            command_array, return_counts=True
-                        )
-                        if np.max(comm_counts) > command_reps:
-                            stuck = True
+                    if last_command == chosen_command:
+                        command_reps_count += 1
+                    else:
+                        command_reps_count = 0
+                    if command_reps_count > max_command_reps:
+                        stuck = True
                     Walking = activate_control(chosen_command, Walking)
                 if counter > max_steps:
                     print("too many steps")
@@ -614,27 +633,63 @@ def run_bot(Y, max_steps=1000):
                 final_boss_search_score += boss_search_score
                 final_assertiveness_score += assertiveness_score
                 final_rune_score += rune_score
+            if not is_alive and not is_dead:
+                print("possibly dead")
+                dead_stack = deque([])
+                while len(dead_stack) < stack_depth:
+                    capt_frame = pyautogui.screenshot(region=r)
+                    capt_frame = capt_frame.resize((width, height))
+                    c_frame = capt_frame.convert("HSV")
+                    c_array = np.array(c_frame)
+                    c_array = c_array / 255.0
+                    dead_stack.append(c_array)
+                dead_frame_array = np.array(dead_stack)
+                diff_val = np.linalg.norm(np.diff(dead_frame_array, axis=0))
+                if diff_val >= 3.0:
+                    print("still alive")
+                    pydirectinput.mouseDown(button="left")
+                    capt_frame = capt_frame.resize((width, height))
+                    c_frame = capt_frame.convert("HSV")
+                    c_array = np.array(c_frame)
+                    c_array = c_array / 255.0
+                    dead_stack.append(c_array)
+                    if len(dead_stack) > (stack_depth // 3):
+                        dead_stack.popleft()
+                    dead_frame_array = np.array(dead_stack)
+                    diff_val = np.linalg.norm(np.diff(dead_frame_array, axis=0))
+                    is_dead = False
+                    is_alive = True
+                else:
+                    is_dead = True
             if is_dead:
+                print("actually dead")
                 break
             if stuck:
                 break
     for Key in ["a", "w", "s", "d", "space"]:
         pydirectinput.keyUp(Key)
+    time_penalty = 0.0
+    if running_time >= max_time:
+        time_penalty = 10.0
+    avg_entropy = entropy_accumulator / counter
     print("general score: ", final_part_score)
+    entropy_penalty = avg_entropy
+    print("entropy penalty: ", entropy_penalty)
     print("rune score: ", final_rune_score)
     print("boss detection score: ", final_boss_search_score)
     print("wanderlust score: ", exploration_score)
     print("confidence score: ", final_assertiveness_score)
     print("weights penalty: ", weights_penalty)
-    print("gate score: ", gate_score)
+    # print("grace score: ", grace_score)
     print("size penalty: ", network_size_penalty)
     total_score = (
         total_score
         - weights_penalty
         - network_size_penalty
         + exploration_score
-        + gate_score
+        # + grace_score
     )
+    total_score = total_score - time_penalty - entropy_penalty
     print("total score: ", total_score)
     print("\n")
     if stuck:
